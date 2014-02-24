@@ -182,8 +182,10 @@ sub inc { $_[0]->{inc}     ||= \@INC }
 sub libs { $_[0]->{libs}   ||= [ \'PERL5LIB' ] }
 sub bins { $_[0]->{bins}   ||= [ \'PATH' ] }
 sub roots { $_[0]->{roots} ||= [ \'PERL_LOCAL_LIB_ROOT' ] }
+sub versioned { $_[0]->{versioned} ||= [ \'PERL_LOCAL_LIB_VER' ] }
 sub extra { $_[0]->{extra} ||= {} }
 sub quiet { $_[0]->{quiet} }
+sub no_create { $_[0]->{no_create} }
 
 my $_archname = $Config{archname};
 my $_version  = $Config{version};
@@ -205,6 +207,15 @@ sub _remove_from {
     if !@remove;
   my %remove = map { $_ => 1 } @remove;
   grep !$remove{$_}, _as_list($list);
+}
+sub _remove_matching_from {
+  my ($list, $match, @remove) = @_;
+  return @$list
+    if !@remove;
+  my %remove = map { $_ => 1 } @remove;
+  my @match = _as_list($match);
+  my @list = _as_list($list);
+  map { defined $match[$_] && $remove{$match[$_]} ? () : $list[$_] } 0 .. $#list;
 }
 
 my @_lib_subdirs = (
@@ -331,24 +342,12 @@ sub deactivate {
     inc   => [ _remove_from($self->inc,
       $self->lib_paths_for($path)) ],
     roots => [ _remove_from($self->roots, $path) ],
+    versioned => [ _remove_matching_from($self->versioned, $self->roots, $path) ],
   );
 
-  my $extra_method = 'installer_options_for';
-  my $new_root = $args{roots}[0];
-  if (defined $new_root) {
-    my $bin_path = $self->install_base_bin_path($new_root);
-    my $vbin_path = $self->install_base_bin_versioned_path($new_root);
-    for my $bin (@{ $args{bins} }) {
-      if ($bin eq $bin_path) {
-        last;
-      }
-      elsif ($bin eq $vbin_path) {
-        $extra_method = 'installer_versioned_options_for';
-        last;
-      }
-    }
-  }
-  $args{extra} = { $self->$extra_method($new_root) };
+  my $extra_method = $args{versioned}[0] ? 'installer_versioned_options_for'
+                                         : 'installer_options_for';
+  $args{extra} = { $self->$extra_method($args{roots}[0]) };
 
   $self->clone(%args);
 }
@@ -372,7 +371,8 @@ sub deactivate_all {
         map $self->lib_paths_for($_), @active_lls) ],
       inc => [ _remove_from($self->inc,
         map $self->lib_paths_for($_), @active_lls) ],
-      roots => [ _remove_from($self->roots, @active_lls) ],
+      roots => [],
+      versioned => [],
     );
   }
 
@@ -397,7 +397,7 @@ sub activate {
     $self = $self->deactivate($path);
   }
 
-  my $versioned = $opts->{versioned};
+  my $versioned = $opts->{versioned} ? 1 : 0;
   my $bin_method = $versioned ? 'install_base_bin_versioned_path'
                               : 'install_base_bin_path';
   my %args;
@@ -406,6 +406,7 @@ sub activate {
       bins  => [ $self->$bin_method($path), @{$self->bins} ],
       libs  => [ $self->install_base_perl_path($path), @{$self->libs} ],
       inc   => [ $self->lib_paths_for($path), @{$self->inc} ],
+      versioned => [ $versioned, @{$self->versioned} ],
       roots => [ $path, @{$self->roots} ],
     );
   }
@@ -446,6 +447,7 @@ sub build_environment_vars {
     PATH                => join($_path_sep, _as_list($self->bins)),
     PERL5LIB            => join($_path_sep, _as_list($self->libs)),
     PERL_LOCAL_LIB_ROOT => join($_path_sep, _as_list($self->roots)),
+    PERL_LOCAL_LIB_VER  => join($_path_sep, _as_list($self->versioned)),
     %{$self->extra},
   );
 }
@@ -502,6 +504,7 @@ sub environment_vars_string {
     PATH                => $self->bins,
     PERL5LIB            => $self->libs,
     PERL_LOCAL_LIB_ROOT => $self->roots,
+    PERL_LOCAL_LIB_VER  => $self->versioned,
     map { $_ => $extra->{$_} } sort keys %$extra,
   );
   $self->_build_env_string($shelltype, \@envs);
