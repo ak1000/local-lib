@@ -55,7 +55,7 @@ my @shells;
 for my $shell (
   {
     name => 'sh',
-    test => '-c "exit 0"',
+    test => '-c "[ -x \$0 ]"',
   },
   {
     name => 'sh -u',
@@ -140,7 +140,7 @@ for my $shell (
   }
   elsif ($shell->{test}) {
     no warnings 'exec';
-    if (system "$shell->{shell} $shell->{test} > $nul 2> $nul") {
+    if (system qq{$shell->{shell} $shell->{test} "$perl" > $nul 2> $nul}) {
       note "$name is unusable, skipping";
       next;
     }
